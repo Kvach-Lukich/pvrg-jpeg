@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+#export DH_VERBOSE=1
+
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+VER_MAJOR = 1
+VER_MINOR = 2
+VER_PATCH = 1
+VER_FULL = $(VER_MAJOR).$(VER_MINOR).$(VER_PATCH)
+VER_FULL_DFSG = $(VER_MAJOR).$(VER_MINOR).$(VER_PATCH)+dfsg1
+
+UPSTREAM_SRC = JPEGv$(VER_FULL)
+DEBIAN_SRC_DIR = pvrg-jpeg-$(VER_FULL)
+DEBIAN_SRC_TAR = pvrg-jpeg_$(VER_FULL_DFSG).orig.tar.gz
+
+CMAKE_EXTRA_FLAGS += -DCMAKE_INSTALL_PREFIX="/usr" \
+		-DCMAKE_SKIP_RPATH=ON \
+		-DCMAKE_BUILD_TYPE:STRING="" \
+		-DBUILD_SHARED_LIBS=ON
+
+%:
+	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	dh_auto_configure -- $(CMAKE_EXTRA_FLAGS)

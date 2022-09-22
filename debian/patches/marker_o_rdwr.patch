@@ -1,0 +1,17 @@
+Description: deprecated O_WRONLY, replaced by portable O_RDWR
+Author: Mathieu Malaterre <malat@debian.org>
+Forwarded: not-needed
+
+Index: pvrg-jpeg-1.2.1+dfsg1/marker.c
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/marker.c	2013-10-08 16:36:20.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/marker.c	2013-10-08 16:36:23.000000000 +0200
+@@ -671,7 +671,7 @@
+     }
+   else
+     {
+-      MakeIob(IOB_BLOCK,O_WRONLY | O_CREAT | O_TRUNC,
++      MakeIob(IOB_BLOCK,O_RDWR | O_CREAT | O_TRUNC,
+ 	      ((CFrame->DataPrecision>8)?2:1));
+       if (CFrame->GlobalHeight)
+ 	{

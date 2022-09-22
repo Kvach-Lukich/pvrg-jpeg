@@ -1,0 +1,386 @@
+Description: Stanford PVRG JPEG Patches for GE DICOM MOD
+ As described in the medical image format FAQ, as well as the conformance
+ statement for the GE CTi, there are some problems with the JPEG lossless
+ compression on the DICOM 130mm MOD that the older models of the CTi write.
+ .
+ This patch to the Stanford PVRG JPEG code copes with these bugs, determining
+ from the compressed bit stream whether the GE bug is present or not, and if
+ present copes with it and decompresses the images as intended. Note that one
+ also needs to handle other bugs in the DICOM encapsulation, as do the recent
+ versions of dicom3tools (see for example dctoraw).
+ .
+ The patch is a composite of contributions from various other authors who have
+ suggested ways to handle the bug in both the Stanford and the Cornell code, and
+ thanks are due to them, as well as those at GE who were involved in detecting,
+ describing and correcting the bug in later CTi, MR LX and AW software versions.
+ .
+ There is also another patch (unrelated to the GE issue) to make the codec work
+ on MacOSX ... it turns out that the original code made assumptions about the
+ arguments and return values of lseek() which are not valid on some systems that
+ use a quad long (64 bits) for the offset type (off_t). The patch corrects for
+ this, as well as taking into account that the lseek() return value doesn't seem
+ to be set right on MacOSX and uses fstat() instead to determine file size wrt.
+ truncation. The most recent version also accounts for the need to not use
+ yywrap.
+Author: David Clunie <dclunie@dclunie.com>
+Origin: other, http://www.dclunie.com/jpegge.html
+Forwarded: not-needed
+Reviewed-By: Mathieu Malaterre <malat@debian.org>
+Last-Update: 2013-10-08
+
+Index: pvrg-jpeg-1.2.1+dfsg1/huffman.c
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/huffman.c	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/huffman.c	2013-10-08 16:36:20.000000000 +0200
+@@ -57,6 +57,7 @@
+ extern void MakeDhuff();
+ extern void UseACHuffman();
+ extern void UseDCHuffman();
++extern void UseDCHuffmanCheckingGEMSBug();
+ extern void SetACHuffman();
+ extern void SetDCHuffman();
+ extern void PrintHuffman();
+@@ -678,6 +679,42 @@
+      int index;
+ {
+   BEGIN("UseDCHuffman");
++index = 0;
++  Xhuff = CImage->DCXhuff[index];
++  Dhuff = CImage->DCDhuff[index];
++  Ehuff = CImage->DCEhuff[index];
++  if (!Dhuff && !Ehuff)
++    {
++      WHEREAMI();
++      printf("Reference to nonexistent table %d.\n",index);
++    }
++}
++
++/*BFUNC
++
++UseDCHuffmanCheckingGEMSBug() installs the DC Huffman structure from the CImage
++structure.
++
++EFUNC*/
++
++void UseDCHuffmanCheckingGEMSBug(index,detected_gems_predictor_bug)
++     int index;
++     int *detected_gems_predictor_bug;
++{
++  BEGIN("UseDCHuffmanCheckingGEMSBug");
++
++  if (index == 1
++   && !CImage->DCDhuff[index] && !CImage->DCEhuff[index]
++   && CImage->DCDhuff[0] && !CImage->DCEhuff[0])
++    {
++      index = 0;
++      *detected_gems_predictor_bug = 1;
++      printf("GE table selection bug detected - assuming predictor bug also\n",index);
++    }
++  else
++    {
++      *detected_gems_predictor_bug = 0;
++    }
+ 
+   Xhuff = CImage->DCXhuff[index];
+   Dhuff = CImage->DCDhuff[index];
+Index: pvrg-jpeg-1.2.1+dfsg1/makefile
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/makefile	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/makefile	2013-10-08 16:36:20.000000000 +0200
+@@ -7,16 +7,20 @@
+ #  SYSV allows for SYSV system IO calls.  NOTRUNCATE allows
+ #  for UNIX emulators without the ftruncate() call.
+ #
++#  For gcc on Solaris use DFCNTL_FOR_O_RDONLY to include <fcntl.h> not SYSV <sys/fnctl.h>`
++#
+ #DEFINES = -DSYSV -DNOTRUNCATE
+ #
+ 
+-DEFINES = 
++#DEFINES = -DFCNTL_FOR_O_RDONLY 
++CC = gcc
++LEXARGS = -ll
+ JFLAGS = -O
+ DEFS = system.h globals.h prototypes.h param.h
+ BASELINE =  jpeg.o codec.o huffman.o io.o chendct.o leedct.o lexer.o marker.o stream.o transform.o
+ 
+ .c.o:
+-	cc $(JFLAGS) $(DEFINES) -c $*.c 
++	$(CC) $(JFLAGS) $(DEFINES) -c $*.c 
+ 
+ .c.ln:
+ 	lint -c $*.c 
+@@ -24,10 +28,10 @@
+ all: jpeg
+ 
+ clean:
+-	rm *.o jpeg
++	rm -f *.o jpeg lexer.c
+ 
+ jpeg: $(BASELINE) 
+-	cc $(DEFINES) $(JFLAGS) $(BASELINE) -lm -o jpeg
++	$(CC) $(DEFINES) $(JFLAGS) $(BASELINE) -lm -o jpeg
+ 
+ jpeg.o: jpeg.c $(DEFS) tables.h
+ codec.o: codec.c $(DEFS)
+@@ -54,7 +58,12 @@
+ #  Caution: Sometimes -ll is required.
+ #
+ #
+-#lexer.c: lexer.l
+-#	lex lexer.l
+-#	mv lex.yy.c lexer.c
+-#
++lexer.c: lexer.l
++	lex $(LEXARGS) lexer.l
++	#mv lex.yy.c lexer.c
++	echo "#ifdef FCNTL_FOR_O_RDONLY" >lexer.c
++	echo "#include <fcntl.h>" >>lexer.c
++	echo "#endif" >>lexer.c
++	cat lex.yy.c >>lexer.c
++	rm lex.yy.c
++
+Index: pvrg-jpeg-1.2.1+dfsg1/jpeg.c
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/jpeg.c	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/jpeg.c	2013-10-08 16:36:20.000000000 +0200
+@@ -30,6 +30,9 @@
+ 
+ #include "tables.h"
+ #include "globals.h"
++#ifdef FCNTL_FOR_O_RDONLY
++#include <fcntl.h>
++#endif
+ #ifdef SYSV
+ #include <sys/fcntl.h>
+ #endif
+@@ -1358,6 +1361,8 @@
+   int MaxElem,CurrentElem,NumberElem;
+   int StartofLine=1,UseType=1;              /* Start with type 1 coding */
+   int *input;
++  int last_pixel;				/* should initialize this sometime */
++  int detected_gems_predictor_bug;
+ 
+   PointTransform=CScan->SAL;
+   for(j=0;j<CScan->NumberComponents;j++)    /* Important to rewind to start */
+@@ -1379,7 +1384,7 @@
+ 	}
+     }
+   InstallIob(0);
+-  UseDCHuffman(CScan->td[0]);          /* Install DC table */
++  UseDCHuffmanCheckingGEMSBug(CScan->td[0],&detected_gems_predictor_bug);          /* Install DC table */
+   if (CScan->NumberComponents==1)
+     height=horfreq=1;
+   else
+@@ -1466,7 +1471,8 @@
+ 	      px = input[width];
+ 	      break;
+ 	    case 2:
+-	      px = input[1];
++	    /*px = input[1];*/
++	      px = detected_gems_predictor_bug ? last_pixel : input[1];
+ 	      break;
+ 	    case 3:
+ 	      px = input[0];
+@@ -1493,7 +1499,13 @@
+ 	  else
+ 	    {
+ 	      value = LosslessDecodeDC();
+-	      input[width+1] = (value+px)&0xffff;
++	      if (detected_gems_predictor_bug) {
++	        input[width+1] = (px-value)&0xffff;
++	        last_pixel = (px-value)&0xffff;
++	      }
++	      else {
++	        input[width+1] = (value+px)&0xffff;
++	      }
+ 	      if (Loud > MUTE)
+ 		{
+ 		  printf("OUT=%d  PX=%d  VAL: %d\n",
+Index: pvrg-jpeg-1.2.1+dfsg1/io.c
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/io.c	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/io.c	2013-10-08 16:36:20.000000000 +0200
+@@ -36,6 +36,7 @@
+ #include <sys/fcntl.h>
+ #include <sys/unistd.h>
+ #endif
++#include <sys/stat.h>
+ 
+ 
+ /* Functions which are local and which are exported. */
+@@ -439,7 +440,8 @@
+      BUFFER *buffer;
+ {
+   BEGIN("ReadResizeBuffer");
+-  int retval,diff,location,amount;
++  int retval,diff,amount;
++  off_t location;
+ 
+   diff = buffer->tptr - buffer->bptr;        /* Find out the current usage */
+   if (len > buffer->size-1)                  /* calculate if we can hold it */
+@@ -490,11 +492,13 @@
+ {
+   BEGIN("FlushBuffer");
+   int retval;
++  off_t location;
+ 
+ #ifdef IO_DEBUG
+   printf("WriteLseek %d\n",buffer->streamoffs+buffer->currentoffs);
+ #endif
+-  lseek(buffer->iob->file,buffer->streamoffs+buffer->currentoffs,L_SET);
++  location=buffer->streamoffs+buffer->currentoffs;
++  lseek(buffer->iob->file,location,L_SET);
+   if ((retval = write(buffer->iob->file,
+ 		      buffer->space,
+ 		      (buffer->bptr - buffer->space))) < 0)
+@@ -747,20 +751,25 @@
+ void SeekEndIob()
+ {
+   BEGIN("SeekEndIob");
+-  int size,tsize;
++  off_t size,tsize;
+   static char Terminator[] = {0x80,0x00};
++  off_t location;
++  struct stat sb;
+ 
+-  size = lseek(Iob->file,0,2);
++  location=0;
++  /*size = lseek(Iob->file,location,2);*/
++  fstat(Iob->file,&sb);
++  size=sb.st_size;
+   tsize = Iob->width*Iob->height*Iob->wsize;
+   if (size !=  tsize)
+     {
+       WHEREAMI();
+       printf("End not flush, making flush (actual: %d != target:%d)\n",
+-	     size,tsize);
++	     (int)size,(int)tsize);
+ 
+       if (size<tsize)
+ 	{
+-	  lseek(Iob->file,tsize-1,0L);         /* Seek and terminate */
++	  lseek(Iob->file,tsize-1,0);         /* Seek and terminate */
+ 	  write(Iob->file,Terminator,1);
+ 	}
+       else if (size > tsize)
+@@ -768,7 +777,7 @@
+ #ifdef NOTRUNCATE
+ 	  WHEREAMI();
+ 	  printf("file is too large, only first %d bytes valid\n",
+-		 tsize);
++		 (int)tsize);
+ #else
+ 	  ftruncate(Iob->file,tsize);                   /* simply truncate*/
+ #endif
+@@ -885,7 +894,9 @@
+ void TerminateFile()
+ {
+   BEGIN("TerminateFile");
+-  int i,size;
++  int i;
++  off_t size;
++  off_t location;
+   static char Terminator[] = {0x80,0x00};
+ 
+   if (CFrame->GlobalHeight)
+@@ -907,16 +918,14 @@
+ 		     CFrame->vf[CScan->ci[i]]);
+ 	      InstallIob(i);
+ 	      FlushIob();
+-	      size = lseek(CScan->Iob[i]->file,0,2);
+-	      if (size !=
+-		  CFrame->Width[CScan->ci[i]]*CFrame->Height[CScan->ci[i]]*
+-		  CScan->Iob[i]->wsize)
++	      location=0;
++	      size = lseek(CScan->Iob[i]->file,location,2);
++	      location=CFrame->Width[CScan->ci[i]]*CFrame->Height[CScan->ci[i]]*CScan->Iob[i]->wsize;
++	      if (size != location)
+ 		{                                      /* Terminate file */
+-		  lseek(CScan->Iob[i]->file,           /* by seeking to end */
+-			(CFrame->Width[CScan->ci[i]]*  /* And writing byte */
+-			 CFrame->Height[CScan->ci[i]]*
+-			 CScan->Iob[i]->wsize)-1,      /* Making flush with */
+-			0L);                           /* Original size  */
++		  lseek(CScan->Iob[i]->file,           /* by seeking to end and writing byte */
++			location-1,                    /* Making flush with */
++			0);                            /* Original size  */
+ 		  write(CScan->Iob[i]->file,Terminator,1);
+ 		}
+ 	    }
+Index: pvrg-jpeg-1.2.1+dfsg1/SETUP
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/SETUP	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/SETUP	2013-10-08 16:36:20.000000000 +0200
+@@ -17,6 +17,11 @@
+ which allows for SYSV libraries to be used instead.  The NOTRUNCATE
+ flag avoids the lack of the ftruncate() call used in io.c.
+ 
++For some gcc versions on Solaris, need to include <ftype.h> not
++<sys/ftype.h> otherwise O_RDONLY etc. are not defined; define
++FCNTL_FOR_O_RDONLY. This also may need to be added to the lexer.c
++output by lex to make it compile.
++
+ Caution: For the compilation, the lexer.l file should be older than
+ the lexer.c file otherwise many machines will try and lex the lexer.l
+ file (thus clobbering potentially the lexer.c file).  In general, the
+@@ -25,6 +30,10 @@
+ and then remade, in which case, the lexer.c file will be older because
+ is lexically of lesser value than lexer.l.  This is a potential bug.
+ 
++For recent MacOS versions, need to changer lexer.l to specify
++"%option noyywrap" outside the "%{ ...}%" section and remove the
++"#define yywrap() 1" definition.
++
+ 3) Testing the program.
+ 
+ Two small test files are nonint.jpg and blkint.jpg.  If you wish to
+Index: pvrg-jpeg-1.2.1+dfsg1/prototypes.h
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/prototypes.h	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/prototypes.h	2013-10-08 16:36:20.000000000 +0200
+@@ -85,6 +85,7 @@
+ extern void MakeDhuff();
+ extern void UseACHuffman();
+ extern void UseDCHuffman();
++extern void UseDCHuffmanCheckingGEMSBug();
+ extern void SetACHuffman();
+ extern void SetDCHuffman();
+ extern void PrintHuffman();
+Index: pvrg-jpeg-1.2.1+dfsg1/lexer.l
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/lexer.l	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/lexer.l	2013-10-08 16:36:20.000000000 +0200
+@@ -15,14 +15,13 @@
+ Video Research Group (PVRG) code, and not by any author(s) (or
+ Stanford University) name.
+ *************************************************************/
+-%{
+ 
+-/*LABEL lexer.c */
+ 
+-/* Redefine the yywrap so that we don't have
+-   to worry about lex library */
++%option noyywrap
+ 
+-# define yywrap() (1)
++%{
++
++/*LABEL lexer.c */
+ 
+ static char *ReservedWords[] = {   /* Token names */
+ "COMPONENT",
+Index: pvrg-jpeg-1.2.1+dfsg1/marker.c
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/marker.c	2013-10-08 16:36:18.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/marker.c	2013-10-08 16:36:20.000000000 +0200
+@@ -32,6 +32,9 @@
+ #include "globals.h"
+ #include "stream.h"
+ #include "marker.h"
++#ifdef FCNTL_FOR_O_RDONLY
++#include <fcntl.h>
++#endif
+ #ifdef SYSV
+ #include <sys/fcntl.h>
+ #endif

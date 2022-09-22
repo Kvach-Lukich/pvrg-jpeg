@@ -1,0 +1,65 @@
+pvrg-jpeg (1.2.1+dfsg1-6) unstable; urgency=medium
+
+  * debhelper 11
+  * Point Vcs fields to salsa.debian.org
+  * Standards-Version: 4.3.0
+
+ -- Andreas Tille <tille@debian.org>  Tue, 08 Jan 2019 22:32:18 +0100
+
+pvrg-jpeg (1.2.1+dfsg1-5) unstable; urgency=medium
+
+  [ Mathieu Malaterre ]
+  * Remove self from Uploaders
+
+  [ Andreas Tille ]
+  * Moved packaging from SVN to Git
+  * debhelper 10
+  * Standards-Version: 4.1.1
+  * Add myself as Uploader after Mathieu shamelessly left the team
+  * Fix spelling
+  * hardening=+all
+
+ -- Andreas Tille <tille@debian.org>  Wed, 29 Nov 2017 13:30:04 +0100
+
+pvrg-jpeg (1.2.1+dfsg1-4) unstable; urgency=medium
+
+  * Team upload
+  * cme fix dpkg-control
+  * DEP5 copyright including Files-Excluded for doc.ps
+  * Remove redundant doc files README.source and TODO
+  * adapt get-orig-source target to Files-Excluded
+  * Fix Mayhem issue (if only upstream would use getopt ...)
+    Closes: #716141
+
+ -- Andreas Tille <tille@debian.org>  Wed, 23 Dec 2015 22:31:12 +0100
+
+pvrg-jpeg (1.2.1+dfsg1-3) unstable; urgency=low
+
+  * Add Stanford PVRG JPEG
+    + d/p/jpegge.patch
+  * Simplify d/rules using dh/9
+  * Switch to Standard Version 3.9.4, no changes needed
+
+ -- Mathieu Malaterre <malat@debian.org>  Tue, 08 Oct 2013 16:58:29 +0200
+
+pvrg-jpeg (1.2.1+dfsg1-2) unstable; urgency=low
+
+  * Switch to dpkg-source 3.0 (quilt) format
+  * Use my @d.o alias
+  * Remove DMUA flag, not required
+  * Simplify d/rules
+  * Use hardening flags
+
+ -- Mathieu Malaterre <malat@debian.org>  Tue, 10 Apr 2012 18:32:54 +0200
+
+pvrg-jpeg (1.2.1+dfsg1-1) unstable; urgency=low
+
+  * Initial release (Closes: #508992)
+  * Properly install in /usr (instead of /usr/local)
+  * Add missing pvrg-jpeg.install file.
+  * Add note about naming convention (pvrg-jpeg)
+  * Install changelog. Install man page. Add CPack section.
+  * Adding patch from eli (panix.com), which adds support for PGM outputs
+  * Properly set dfsg naming convention since doc.ps was removed from source
+
+ -- Mathieu Malaterre <mathieu.malaterre@gmail.com>  Fri, 07 Aug 2009 11:09:09 +0200

@@ -1,0 +1,61 @@
+Description: Need to patch lexel.l to get it to produce proper code
+Author: Mathieu Malaterre <malat@debian.org>
+Forwarded: not-needed
+
+Index: pvrg-jpeg-1.2.1+dfsg1/lexer.l
+===================================================================
+--- pvrg-jpeg-1.2.1+dfsg1.orig/lexer.l	2013-10-08 16:37:40.000000000 +0200
++++ pvrg-jpeg-1.2.1+dfsg1/lexer.l	2013-10-08 16:39:20.000000000 +0200
+@@ -19,10 +19,27 @@
+ 
+ %option noyywrap
+ 
++%option yylineno
+ %{
+ 
+ /*LABEL lexer.c */
+ 
++/*
++ * flex command was run this way:
++ * 
++ *  $ lex -olexer.c lexer.l
++ */
++
++/* We do not care of interactive mode */
++#define YY_NEVER_INTERACTIVE 1
++#define YY_NO_UNPUT 1
++
++/* Do not include unistd.h in generated source. */
++#define YY_NO_UNISTD_H
++
++/* Skip declaring this function.  It is a macro.  */
++#define YY_SKIP_YYWRAP
++
+ static char *ReservedWords[] = {   /* Token names */
+ "COMPONENT",
+ "SCAN",
+@@ -363,12 +380,13 @@
+ {
+   BEGIN("hashpjw");
+   char *p;
+-  unsigned int h=0,g;
++  unsigned int g, h;
++  h=0;
+ 
+   for(p=s;*p!=EOS;p++)       /* Taken from Aho Sethi Ullman Compilers book. */
+     {
+       h = (h << 4) + *p;
+-      if (g = h&0xf0000000)
++      if ((g = h&0xf0000000))
+ 	{
+ 	  h = h ^(g >> 24);
+ 	  h = h ^ g;
+@@ -620,7 +638,7 @@
+   int Start,End;
+   int *ptr,*ptr2;
+ 
+-  while(token=yylex())        /* The code handling is simple enough. */
++  while((token=yylex()))        /* The code handling is simple enough. */
+     {                         /* just read the code and documentation */
+       ErrorValue=0;           /* book... */
+       arrayflag=0;
