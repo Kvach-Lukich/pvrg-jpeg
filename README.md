@@ -20,3 +20,4 @@ In encoder mode, a new parameter `-e <number_of_components>` has been added, all
 1. Install **GCC**:
    ```bash
    sudo apt install build-essential
+2. Run `build.sh`
