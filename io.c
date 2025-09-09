@@ -31,12 +31,18 @@ case, two-line-based, assumed to be of two lines per.
 /*LABEL io.c */
 
 /* Include definitions. */
+
 #include "globals.h"
 #ifdef SYSV
 #include <sys/fcntl.h>
 #include <sys/unistd.h>
 #endif
+#include <sys/stat.h>
 
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 /* Functions which are local and which are exported. */
 
@@ -63,6 +69,7 @@ extern void CloseIob();
 extern void MakeIob();
 extern void PrintIob();
 extern void InstallIob();
+extern void InstallHeaderIob();
 extern void TerminateFile();
 
 extern void ReadLine();
@@ -79,6 +86,7 @@ extern int PointTransform;   /* Used for shifting the pels from the I/O */
 extern IMAGE *CImage;
 extern FRAME *CFrame;
 extern SCAN *CScan;
+extern STDINOUT *stdInOut;
 
 /* Internal variables. */
 static IOBUF *Iob=NULL;               /* Internal I/O buffer. */
@@ -165,10 +173,14 @@ void MakeIob(type,flags,wsize)
      int wsize;
 {
   BEGIN("MakeIob");
-  int index,sofs;
+  int index,sofs,hsize;
+  char header[128];
   BUFFER **current;
   IOBUF *temp;
-
+#ifdef _WIN32
+flags |= O_BINARY;
+#endif
+  
   for(index=0;index<CScan->NumberComponents;index++) /* Make IOBUF */
     {                                                /* For each component */
       if (!(temp = MakeStructure(IOBUF)))
@@ -182,6 +194,7 @@ void MakeIob(type,flags,wsize)
       temp->wsize = wsize;
       temp->hpos=0;
       temp->vpos=0;
+      temp->hsize=0;
       temp->width = CFrame->Width[CScan->ci[index]];  /* Set up widthxheight */
       temp->height = CFrame->Height[CScan->ci[index]];
       if (CScan->NumberComponents==1)
@@ -215,15 +228,26 @@ void MakeIob(type,flags,wsize)
 	  printf("Cannot allocate Iob bufferlist.\n");
 	  exit(ERROR_MEMORY);
 	}
-      if ((temp->file =                               /* Open file */
-	   open(CFrame->ComponentFileName[CScan->ci[index]],
-		flags,UMASK)) < 0)
-	{
-	  WHEREAMI();
-	  printf("Cannot open file %s.\n",
-		 CFrame->ComponentFileName[CScan->ci[index]]);
-	  exit(ERROR_INIT_FILE);
-	}               /* Make buffer for every line of component in MDU */
+      if(Loud > MUTE) {
+	printf("About to open %s from io.c:MakeIob\n",
+		CFrame->ComponentFileName[CScan->ci[index]]);
+      }
+      if(stdInOut->Ccount<1){
+        if ((temp->file =                               /* Open file */
+          open(CFrame->ComponentFileName[CScan->ci[index]],
+          flags,UMASK)) < 0)
+        {
+          WHEREAMI();
+          printf("Cannot open file %s.\n",
+          CFrame->ComponentFileName[CScan->ci[index]]);
+          exit(ERROR_INIT_FILE);
+        }
+      }
+      temp->cindex = index;
+      temp->hsize = snprintf(temp->header,128,
+	  		"P5\n%d %d\n255\n",temp->width,temp->height);
+
+	                /* Make buffer for every line of component in MDU */
       for(sofs=0,current=temp->blist;current<temp->blist+temp->num;current++)
 	{
 	  *current = MakeXBuffer(CFrame->BufferSize, wsize);
@@ -252,13 +276,13 @@ void PrintIob()
 
   if (Iob)
     {
-      printf("*** Iob ID: %x ***\n",Iob);
+      printf("*** Iob ID: %p ***\n",(void*)Iob);
       printf("Number of Buffers: %d  Width: %d  Height: %d\n",
 	     Iob->num,Iob->width,Iob->height);
       printf("hpos: %d  vpos: %d  hor-freq: %d  ver-freq: %d\n",
 	     Iob->hpos,Iob->vpos,Iob->hor,Iob->ver);
-      printf("filed: %d  flags: %d  BufferListId: %x\n",
-	     Iob->file,Iob->flags,Iob->blist);
+      printf("filed: %d  flags: %d  BufferListId: %p\n",
+	     Iob->file,Iob->flags,(void*)Iob->blist);
     }
   else
     {
@@ -439,7 +463,11 @@ static void ReadResizeBuffer(len,buffer)
      BUFFER *buffer;
 {
   BEGIN("ReadResizeBuffer");
-  int retval,diff,location,amount;
+  int retval,diff,amount;
+  off_t location;
+  size_t mlocation;
+  size_t offset,clen;
+  
 
   diff = buffer->tptr - buffer->bptr;        /* Find out the current usage */
   if (len > buffer->size-1)                  /* calculate if we can hold it */
@@ -458,19 +486,45 @@ static void ReadResizeBuffer(len,buffer)
 
   location = buffer->streamoffs+buffer->currentoffs;
   amount = buffer->size-(buffer->tptr - buffer->space);
-  lseek(buffer->iob->file,location,L_SET);
+  if(stdInOut->Ccount<0){
+    lseek(buffer->iob->file,location,SEEK_SET);
+  }
 #ifdef IO_DEBUG
   printf("Read: Filed %d  Buf: %x  NBytes: %d\n",
 	 buffer->iob->file,buffer->tptr,amount);
 #endif
-  if ((retval = read(buffer->iob->file,      /* Do the read */
-		     buffer->tptr,
-		     amount)) < 0)
-    {
+  if(stdInOut->Ccount<0){
+    if ((retval = read(buffer->iob->file,      /* Do the read */
+          buffer->tptr,
+          amount)) < 0)
+      {
+        WHEREAMI();
+        printf("Cannot Resize.\n");
+        exit(ERROR_READ);
+      }
+  }else{
+    clen =(size_t)(CFrame->GlobalWidth * CFrame->GlobalHeight*2);
+    if (location < 0) {
       WHEREAMI();
-      printf("Cannot Resize.\n");
+      printf("negative location %lld.\n", (long long)location);
       exit(ERROR_READ);
     }
+    mlocation=(size_t)location;
+    if(amount<0){
+        WHEREAMI();
+        printf("negative count %d.\n",amount);
+        exit(ERROR_READ);
+    }
+    if(mlocation<clen){
+      if((size_t)amount+mlocation > clen){
+        amount=(int)(clen-mlocation);
+      }
+
+      offset=(size_t)(buffer->iob->cindex*clen+mlocation);
+      memcpy(buffer->tptr, stdInOut->raw +offset, amount);
+      retval = (int)amount;
+    }
+  }
 #ifdef IO_DEBUG
   printf("ReadReturn numbytes %d\n",retval);
 #endif
@@ -490,11 +544,13 @@ static void FlushBuffer(buffer)
 {
   BEGIN("FlushBuffer");
   int retval;
+  off_t location;
 
 #ifdef IO_DEBUG
   printf("WriteLseek %d\n",buffer->streamoffs+buffer->currentoffs);
 #endif
-  lseek(buffer->iob->file,buffer->streamoffs+buffer->currentoffs,L_SET);
+  location=buffer->streamoffs+buffer->currentoffs;
+  lseek(buffer->iob->file,location,SEEK_SET);
   if ((retval = write(buffer->iob->file,
 		      buffer->space,
 		      (buffer->bptr - buffer->space))) < 0)
@@ -622,8 +678,8 @@ static void BlockMoveTo()
   if (Loud > MUTE)
     {
       WHEREAMI();
-      printf("%x  Moving To [Horizontal:Vertical] [%d:%d] \n",
-	     Iob,Iob->hpos,Iob->vpos);
+      printf("%p  Moving To [Horizontal:Vertical] [%d:%d] \n",
+	     (void*)Iob,Iob->hpos,Iob->vpos);
     }
   horizontal =  Iob->hpos * BlockWidth;    /* Calculate actual */
   vertical = Iob->vpos * BlockHeight;      /* Pixel position */
@@ -715,7 +771,7 @@ void FlushIob()
   int i;
 
   if (Loud > MUTE)
-    printf("IOB: %x  Flushing buffers\n",Iob);
+    printf("IOB: %p  Flushing buffers\n",(void*)Iob);
   switch(Iob->type)
     {
     case IOB_BLOCK:
@@ -747,20 +803,25 @@ EFUNC*/
 void SeekEndIob()
 {
   BEGIN("SeekEndIob");
-  int size,tsize;
+  off_t size,tsize;
   static char Terminator[] = {0x80,0x00};
+  off_t location;
+  struct stat sb;
 
-  size = lseek(Iob->file,0,2);
+  location=0;
+  /*size = lseek(Iob->file,location,2);*/
+  fstat(Iob->file,&sb);
+  size=sb.st_size;
   tsize = Iob->width*Iob->height*Iob->wsize;
   if (size !=  tsize)
     {
       WHEREAMI();
       printf("End not flush, making flush (actual: %d != target:%d)\n",
-	     size,tsize);
+	     (int)size,(int)tsize);
 
       if (size<tsize)
 	{
-	  lseek(Iob->file,tsize-1,0L);         /* Seek and terminate */
+	  lseek(Iob->file,tsize-1,0);         /* Seek and terminate */
 	  write(Iob->file,Terminator,1);
 	}
       else if (size > tsize)
@@ -768,7 +829,7 @@ void SeekEndIob()
 #ifdef NOTRUNCATE
 	  WHEREAMI();
 	  printf("file is too large, only first %d bytes valid\n",
-		 tsize);
+		 (int)tsize);
 #else
 	  ftruncate(Iob->file,tsize);                   /* simply truncate*/
 #endif
@@ -885,7 +946,9 @@ EFUNC*/
 void TerminateFile()
 {
   BEGIN("TerminateFile");
-  int i,size;
+  int i;
+  off_t size;
+  off_t location;
   static char Terminator[] = {0x80,0x00};
 
   if (CFrame->GlobalHeight)
@@ -907,16 +970,14 @@ void TerminateFile()
 		     CFrame->vf[CScan->ci[i]]);
 	      InstallIob(i);
 	      FlushIob();
-	      size = lseek(CScan->Iob[i]->file,0,2);
-	      if (size !=
-		  CFrame->Width[CScan->ci[i]]*CFrame->Height[CScan->ci[i]]*
-		  CScan->Iob[i]->wsize)
+	      location=0;
+	      size = lseek(CScan->Iob[i]->file,location,2);
+	      location=CFrame->Width[CScan->ci[i]]*CFrame->Height[CScan->ci[i]]*CScan->Iob[i]->wsize;
+	      if (size != location)
 		{                                      /* Terminate file */
-		  lseek(CScan->Iob[i]->file,           /* by seeking to end */
-			(CFrame->Width[CScan->ci[i]]*  /* And writing byte */
-			 CFrame->Height[CScan->ci[i]]*
-			 CScan->Iob[i]->wsize)-1,      /* Making flush with */
-			0L);                           /* Original size  */
+		  lseek(CScan->Iob[i]->file,           /* by seeking to end and writing byte */
+			location-1,                    /* Making flush with */
+			0);                            /* Original size  */
 		  write(CScan->Iob[i]->file,Terminator,1);
 		}
 	    }
@@ -1109,8 +1170,8 @@ static void LineMoveTo()
   if (Loud > MUTE)
     {
       WHEREAMI();
-      printf("%x  Moving To [Horizontal:Vertical] [%d:%d] \n",
-	     Iob,Iob->hpos,Iob->vpos);
+      printf("%p  Moving To [Horizontal:Vertical] [%d:%d] \n",
+	     (void*)Iob,Iob->hpos,Iob->vpos);
     }
   horizontal =  Iob->hpos;
   vertical = Iob->vpos;
@@ -1139,6 +1200,67 @@ static void LineMoveTo()
     }
 }
 
+/*BFUNC
 
+InstallHeaderIob() puts a pgm raw header on a file. Use just before closing.
+
+EFUNC*/
+
+void InstallHeaderIob()
+{
+  BEGIN("InstallHeaderIob");
+  size_t rsize,tsize,wsize,lsize;
+  char *timage;
+
+  if((Iob->hsize == 0) || (Iob->header == NULL)) {
+    return;
+  }
+  tsize = lseek(Iob->file,0,2);
+  if(tsize < 1) {
+    return;
+  }
+
+  timage = (char*) malloc(tsize);
+  if(timage == NULL) {
+    WHEREAMI();
+    printf("Malloc failure in InstallHeaderIob\n");
+    exit(1); 
+  }
+
+  lsize = lseek(Iob->file,0,0); /* rewind */
+  if(lsize != 0) {
+    WHEREAMI();
+    printf("lseek failure in InstallHeaderIob\n");
+    exit(1); 
+  }
+  rsize = read(Iob->file, timage, tsize);
+  if(rsize != tsize) {
+    WHEREAMI();
+    printf("Read failure in InstallHeaderIob (r %zu != t %zu, fd %d)\n", rsize, tsize, Iob->file);
+    perror("Error:");
+    exit(1); 
+  }
+
+  lsize = lseek(Iob->file,0,0); /* rewind */
+  if(lsize != 0) {
+    WHEREAMI();
+    printf("lseek failure in InstallHeaderIob\n");
+    exit(1); 
+  }
+  wsize = write(Iob->file, Iob->header, Iob->hsize);
+  if(wsize != Iob->hsize) {
+    WHEREAMI();
+    printf("Write failure in InstallHeaderIob\n");
+    exit(1); 
+  }
+  wsize = write(Iob->file, timage, tsize);
+  if(wsize != tsize) {
+    WHEREAMI();
+    printf("Write failure in InstallHeaderIob\n");
+    exit(1); 
+  }
+  free(timage);
+
+}
 
 /*END*/

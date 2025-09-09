@@ -33,6 +33,8 @@ and can be improved, but comprise very little of software run-time.
 
 #include "globals.h"
 #include "stream.h"
+#include <stdlib.h>
+#include <string.h>
 
 /*PUBLIC*/
 
@@ -57,6 +59,7 @@ extern void MakeEhuff();
 extern void MakeDhuff();
 extern void UseACHuffman();
 extern void UseDCHuffman();
+extern void UseDCHuffmanCheckingGEMSBug();
 extern void SetACHuffman();
 extern void SetDCHuffman();
 extern void PrintHuffman();
@@ -542,7 +545,7 @@ int DecodeHuffman()
   else
     {
       WHEREAMI();
-      printf("Huffman read error: l=%d code=%d\n");
+      printf("Huffman read error: l=%d code=%d\n", l, code);
       Resync();
       ErrorValue = ERROR_HUFFMAN_READ;
       return(0);
@@ -678,6 +681,42 @@ void UseDCHuffman(index)
      int index;
 {
   BEGIN("UseDCHuffman");
+index = 0;
+  Xhuff = CImage->DCXhuff[index];
+  Dhuff = CImage->DCDhuff[index];
+  Ehuff = CImage->DCEhuff[index];
+  if (!Dhuff && !Ehuff)
+    {
+      WHEREAMI();
+      printf("Reference to nonexistent table %d.\n",index);
+    }
+}
+
+/*BFUNC
+
+UseDCHuffmanCheckingGEMSBug() installs the DC Huffman structure from the CImage
+structure.
+
+EFUNC*/
+
+void UseDCHuffmanCheckingGEMSBug(index,detected_gems_predictor_bug)
+     int index;
+     int *detected_gems_predictor_bug;
+{
+  BEGIN("UseDCHuffmanCheckingGEMSBug");
+
+  if (index == 1
+   && !CImage->DCDhuff[index] && !CImage->DCEhuff[index]
+   && CImage->DCDhuff[0] && !CImage->DCEhuff[0])
+    {
+      index = 0;
+      *detected_gems_predictor_bug = 1;
+      printf("GE table selection bug detected - assuming predictor bug also\n",index);
+    }
+  else
+    {
+      *detected_gems_predictor_bug = 0;
+    }
 
   Xhuff = CImage->DCXhuff[index];
   Dhuff = CImage->DCDhuff[index];
@@ -736,7 +775,7 @@ void PrintHuffman()
 
   if (Xhuff)
     {
-      printf("Xhuff ID: %x\n",Xhuff);
+      printf("Xhuff ID: %p\n",(void*)Xhuff);
       printf("Bits: [length:number]\n");
       for(i=1;i<9;i++)
 	{
@@ -754,7 +793,7 @@ void PrintHuffman()
     }
   if (Ehuff)
     {
-      printf("Ehuff ID: %x\n",Ehuff);
+      printf("Ehuff ID: %p\n",(void*)Ehuff);
       printf("Ehufco:\n");
       PrintTable(Ehuff->ehufco);
       printf("Ehufsi:\n");
@@ -762,7 +801,7 @@ void PrintHuffman()
     }
   if (Dhuff)
     {
-      printf("Dhuff ID: %x\n",Dhuff);
+      printf("Dhuff ID: %p\n",(void*)Dhuff);
       printf("MaxLength: %d\n",Dhuff->ml);
       printf("[index:MaxCode:MinCode:ValPtr]\n");
       for(i=1;i<5;i++)

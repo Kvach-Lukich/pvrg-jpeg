@@ -15,14 +15,30 @@ advertisement of this source code should refer to it as the Portable
 Video Research Group (PVRG) code, and not by any author(s) (or
 Stanford University) name.
 *************************************************************/
+
+
+%option noyywrap
+
+%option yylineno
 %{
 
 /*LABEL lexer.c */
 
-/* Redefine the yywrap so that we don't have
-   to worry about lex library */
+/*
+ * flex command was run this way:
+ * 
+ *  $ lex -olexer.c lexer.l
+ */
 
-# define yywrap() (1)
+/* We do not care of interactive mode */
+#define YY_NEVER_INTERACTIVE 1
+#define YY_NO_UNPUT 1
+
+/* Do not include unistd.h in generated source. */
+#define YY_NO_UNISTD_H
+
+/* Skip declaring this function.  It is a macro.  */
+#define YY_SKIP_YYWRAP
 
 static char *ReservedWords[] = {   /* Token names */
 "COMPONENT",
@@ -364,12 +380,13 @@ static int hashpjw(s)
 {
   BEGIN("hashpjw");
   char *p;
-  unsigned int h=0,g;
+  unsigned int g, h;
+  h=0;
 
   for(p=s;*p!=EOS;p++)       /* Taken from Aho Sethi Ullman Compilers book. */
     {
       h = (h << 4) + *p;
-      if (g = h&0xf0000000)
+      if ((g = h&0xf0000000))
 	{
 	  h = h ^(g >> 24);
 	  h = h ^ g;
@@ -621,7 +638,7 @@ void parser()
   int Start,End;
   int *ptr,*ptr2;
 
-  while(token=yylex())        /* The code handling is simple enough. */
+  while((token=yylex()))        /* The code handling is simple enough. */
     {                         /* just read the code and documentation */
       ErrorValue=0;           /* book... */
       arrayflag=0;

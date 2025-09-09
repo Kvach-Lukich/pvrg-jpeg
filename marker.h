@@ -52,4 +52,7 @@ Some basic definitions of commonly occurring markers.
 
 #define MARKER_RSC_MASK 0xf8
 
+ void WriteDnl(void);
+ int CheckMarker(void);
+
 #endif

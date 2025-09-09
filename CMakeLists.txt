@@ -1,0 +1,147 @@
+# Main CMakeLists.txt to build the PVRG project using CMake (www.cmake.org)
+# Written by Mathieu Malaterre
+IF(NOT PVRG_NAMESPACE)
+  SET(PVRG_NAMESPACE "PVRG")
+  SET(PVRG_STANDALONE 1)
+  SET(PVRG_INSTALL_BIN_DIR bin)
+  SET(PVRG_INSTALL_LIB_DIR lib)
+  SET(PVRG_INSTALL_INCLUDE_DIR include/pvrg)
+  SET(PVRG_INSTALL_MAN_DIR share/man)
+  OPTION(PVRG_BUILD_SHARED_LIBS "Build PVRG with shared libraries." OFF)
+  SET(BUILD_SHARED_LIBS ${PVRG_BUILD_SHARED_LIBS})
+ELSE(NOT PVRG_NAMESPACE)
+  IF(COMMAND APPEND_COPYRIGHT)
+    APPEND_COPYRIGHT(${CMAKE_CURRENT_SOURCE_DIR}/COPYING)
+  ENDIF(COMMAND APPEND_COPYRIGHT)
+ENDIF(NOT PVRG_NAMESPACE)
+# In all cases:
+STRING(TOLOWER ${PVRG_NAMESPACE} PVRG_LIBRARY_NAME)
+
+PROJECT(${PVRG_NAMESPACE} C)
+CMAKE_MINIMUM_REQUIRED(VERSION 2.2)
+
+if(COMMAND cmake_policy)
+  cmake_policy(SET CMP0003 NEW)
+endif(COMMAND cmake_policy)
+
+#-----------------------------------------------------------------------------
+# PVRG version number, usefull for packaging and doxygen doc:
+SET(PVRG_MAJOR_VERSION 1)
+SET(PVRG_MINOR_VERSION 2)
+SET(PVRG_BUILD_VERSION 1)
+SET(PVRG_VERSION
+  "${PVRG_MAJOR_VERSION}.${PVRG_MINOR_VERSION}.${PVRG_BUILD_VERSION}")
+
+SET(PVRG_LIBRARY_PROPERTIES ${PVRG_LIBRARY_PROPERTIES}
+  VERSION "${PVRG_VERSION}"
+  SOVERSION "${PVRG_MAJOR_VERSION}.${PVRG_MINOR_VERSION}"
+)
+
+# Do full dependency headers.
+INCLUDE_REGULAR_EXPRESSION("^.*$")
+
+SET(
+  PVRG_SRCS
+  jpeg.c
+  codec.c
+  huffman.c
+  io.c
+  chendct.c
+  leedct.c
+  marker.c
+  stream.c
+  transform.c
+)
+
+FIND_PROGRAM(LEX_COMPILER
+  NAMES lex
+)
+
+IF(LEX_COMPILER)
+  ADD_CUSTOM_COMMAND(
+    OUTPUT    ${CMAKE_CURRENT_BINARY_DIR}/lexer.c
+    COMMAND   ${LEX_COMPILER}
+    ARGS      -o ${CMAKE_CURRENT_BINARY_DIR}/lexer.c
+              ${CMAKE_CURRENT_SOURCE_DIR}/lexer.l
+    DEPENDS   ${CMAKE_CURRENT_SOURCE_DIR}/lexer.l
+    COMMENT   "Generating (newer) lexer.c based on lexer.l"
+    )
+  INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+  SET( PVRG_SRCS
+    ${PVRG_SRCS}
+    ${CMAKE_CURRENT_BINARY_DIR}/lexer.c
+  )
+ELSE(LEX_COMPILER)
+  SET( PVRG_SRCS
+    ${PVRG_SRCS}
+    lexer.c
+  )
+ENDIF(LEX_COMPILER)
+
+
+
+# might not be portable, so simply rename the function in the code itself...
+#SET_SOURCE_FILES_PROPERTIES(jpeg.c 
+#  PROPERTIES
+#  COMPILE_FLAGS -Dmain=pvrgmain
+#)
+IF(MSVC)
+ADD_DEFINITIONS(-DNOTRUNCATE)
+ELSE(MSVC)
+ADD_DEFINITIONS(-DSYSV -DNOTRUNCATE)
+ENDIF(MSVC)
+#ADD_DEFINITIONS(-DIO_DEBUG)
+#ADD_LIBRARY(pvrg ${PVRG_SRCS})
+
+ADD_EXECUTABLE(${PVRG_LIBRARY_NAME}-jpeg ${PVRG_SRCS})
+#TARGET_LINK_LIBRARIES(${PVRG_LIBRARY_NAME}-jpeg pvrg)
+
+#IF(NOT PVRG_INSTALL_NO_DEVELOPMENT)
+#  FILE(GLOB header_files "*.h")
+#  INSTALL(FILES ${header_files}
+#    DESTINATION ${PVRG_INSTALL_INCLUDE_DIR} COMPONENT Development
+#  )
+#ENDIF(NOT PVRG_INSTALL_NO_DEVELOPMENT)
+
+IF(NOT PVRG_INSTALL_NO_LIBRARIES)
+  CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/jpeg.1
+    ${CMAKE_CURRENT_BINARY_DIR}/${PVRG_LIBRARY_NAME}-jpeg.1)
+  INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PVRG_LIBRARY_NAME}-jpeg.1
+    DESTINATION ${PVRG_INSTALL_MAN_DIR}/man1 COMPONENT Development
+	)
+  INSTALL(TARGETS ${PVRG_LIBRARY_NAME}-jpeg
+    RUNTIME DESTINATION ${PVRG_INSTALL_BIN_DIR} COMPONENT Runtime
+    LIBRARY DESTINATION ${PVRG_INSTALL_LIB_DIR} COMPONENT Runtime
+    ARCHIVE DESTINATION ${PVRG_INSTALL_LIB_DIR} COMPONENT Development
+	)
+ENDIF(NOT PVRG_INSTALL_NO_LIBRARIES)
+
+IF(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
+  SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY ${PVRG_PACKAGE_DESCRIPTION_SUMMARY})
+  SET(CPACK_PACKAGE_VENDOR "PVRG")
+  #SET(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_BINARY_DIR}/Copyright.txt")
+  #SET(CPACK_RESOURCE_FILE_LICENSE    "${CMAKE_CURRENT_BINARY_DIR}/Copyright.txt")
+  SET(CPACK_PACKAGE_VERSION_MAJOR "${PVRG_MAJOR_VERSION}")
+  SET(CPACK_PACKAGE_VERSION_MINOR "${PVRG_MINOR_VERSION}")
+  SET(CPACK_PACKAGE_VERSION_PATCH "${PVRG_BUILD_VERSION}")
+  SET(CPACK_SOURCE_PACKAGE_FILE_NAME "pvrg-${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+
+  SET(CPACK_SOURCE_IGNORE_FILES "/debian/" "/CVS/" "/\\\\.svn/" "\\\\.swp$")
+  INCLUDE(CPack)
+ENDIF(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
+
+#
+# Should you wish to modify the interpreter
+# modify this portion here.
+#
+# Make sure that you move the first comment from the start to 
+# within the braces %{ /* */ %} in lexer.l,
+# otherwise it will give you a error (definitions too long). 
+#
+#  Caution: Sometimes -ll is required.
+#
+#
+#lexer.c: lexer.l
+#	lex lexer.l
+#	mv lex.yy.c lexer.c
+#

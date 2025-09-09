@@ -25,7 +25,7 @@ stream.
 
 ************************************************************
 */
-
+#include <stdlib.h>
 #ifndef STREAM_DONE
 #define STREAM_DONE
 
@@ -33,6 +33,9 @@ stream.
 #define bputn(nybbleh,nybblel) {bputc(((nybbleh&0x0f)<<4)|(nybblel&0x0f));}
 #define hinyb(val) ((val>>4)&0x0f)
 #define lonyb(val) (val & 0x0f)
+int bgetw(void);
+int brtell(void);
+int brseek(int offset, int ptr);
 
 #endif
 

@@ -30,6 +30,7 @@ the Huffman stream.
 /* Include files. */
 #include "globals.h"
 #include "csize.h"
+#include <stdlib.h>
 
 /* Definitions for renaming functions. */
 

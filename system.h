@@ -58,6 +58,7 @@ IOBUF *iob;              /* References own IOB */
 IOBUF {
 int type;                     /* Iob type */
 int num;                      /* Number of buffers */
+int cindex;
 int wsize;                    /* Element word size in characters */
 int hpos;                     /* Current block position in image */
 int vpos;
@@ -68,6 +69,8 @@ int height;
 int file;                     /* File descriptor */
 int flags;                    /* File mode flags */
 int linelastdefault;          /* Last line element default */
+int hsize;                    /* Header size */
+char header[128];             /* Header textfield */
 BUFFER **blist;               /* A list of buffers */
 };
 

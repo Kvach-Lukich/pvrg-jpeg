@@ -23,7 +23,6 @@ This file contains the global includes and other definitions.
 
 ************************************************************
 */
-
 #ifndef GLOBAL_DONE
 #define GLOBAL_DONE
 
@@ -54,6 +53,7 @@ This file contains the global includes and other definitions.
 #define IMAGE struct Image_Definition
 #define FRAME struct Frame_Definition
 #define SCAN struct Scan_Definition
+#define STDINOUT struct std_Definition
 
 #define MUTE 0
 #define WHISPER 1
@@ -129,6 +129,20 @@ int NumberDCTables;              /* Number of DC Huffman tables */
 DHUFF *DCDhuff[MAXIMUM_DEVICES]; /* Decoder huffman tables */
 EHUFF *DCEhuff[MAXIMUM_DEVICES]; /* Encoder huffman tables */
 XHUFF *DCXhuff[MAXIMUM_DEVICES]; /* Transmittable huffman tables */
+char *OutBaseName;               /* Base file name of output streams */
+int  OutPGM;                     /* Put a PGM header on output streams */
+};
+
+STDINOUT {
+int  Ccount;                     /* count of channels on stdin pipe */
+unsigned char *raw; /*pipe */
+unsigned char *out; /*output */
+size_t output_size;
+size_t output_pos;
+FILE *fid;
+//int fid;
+FILE *srin;
+int Ccmponent;
 };
 
 FRAME {

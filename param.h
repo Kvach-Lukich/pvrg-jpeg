@@ -87,7 +87,7 @@ in per scan */
    words such as 16 bit or 24 bit to have a proper multiple of such
    word.
    */
-#define BUFFERSIZE 256 
+#define BUFFERSIZE 65536
 
 /* Lossless Buffersize is a variable that is kept for the lossless
    streams.  It can be any positive number, though a larger number
@@ -99,7 +99,7 @@ in per scan */
    the lossless buffer. (It would make having the upper buffer useless).
    The minimum number is (MAX_HF+1)*(MAX_VF+1) */
 
-#define LOSSLESSBUFFERSIZE 289
+#define LOSSLESSBUFFERSIZE 4194304
 
 /* Number of streams is the number of active read/write streams possible.
    For all jpeg operations, this value is 1.*/

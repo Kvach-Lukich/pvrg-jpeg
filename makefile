@@ -7,16 +7,20 @@
 #  SYSV allows for SYSV system IO calls.  NOTRUNCATE allows
 #  for UNIX emulators without the ftruncate() call.
 #
+#  For gcc on Solaris use DFCNTL_FOR_O_RDONLY to include <fcntl.h> not SYSV <sys/fnctl.h>`
+#
 #DEFINES = -DSYSV -DNOTRUNCATE
 #
 
-DEFINES = 
+#DEFINES = -DFCNTL_FOR_O_RDONLY 
+CC = gcc
+LEXARGS = -ll
 JFLAGS = -O
 DEFS = system.h globals.h prototypes.h param.h
 BASELINE =  jpeg.o codec.o huffman.o io.o chendct.o leedct.o lexer.o marker.o stream.o transform.o
 
 .c.o:
-	cc $(JFLAGS) $(DEFINES) -c $*.c 
+	$(CC) $(JFLAGS) $(DEFINES) -c $*.c 
 
 .c.ln:
 	lint -c $*.c 
@@ -24,10 +28,10 @@ BASELINE =  jpeg.o codec.o huffman.o io.o chendct.o leedct.o lexer.o marker.o st
 all: jpeg
 
 clean:
-	rm *.o jpeg
+	rm -f *.o jpeg lexer.c
 
 jpeg: $(BASELINE) 
-	cc $(DEFINES) $(JFLAGS) $(BASELINE) -lm -o jpeg
+	$(CC) $(DEFINES) $(JFLAGS) $(BASELINE) -lm -o jpeg
 
 jpeg.o: jpeg.c $(DEFS) tables.h
 codec.o: codec.c $(DEFS)
@@ -54,7 +58,12 @@ lcheck: jpeg.ln codec.ln huffman.ln io.ln chendct.ln leedct.ln lexer.ln marker.l
 #  Caution: Sometimes -ll is required.
 #
 #
-#lexer.c: lexer.l
-#	lex lexer.l
-#	mv lex.yy.c lexer.c
-#
+lexer.c: lexer.l
+	lex $(LEXARGS) lexer.l
+	#mv lex.yy.c lexer.c
+	echo "#ifdef FCNTL_FOR_O_RDONLY" >lexer.c
+	echo "#include <fcntl.h>" >>lexer.c
+	echo "#endif" >>lexer.c
+	cat lex.yy.c >>lexer.c
+	rm lex.yy.c
+

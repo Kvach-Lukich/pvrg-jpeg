@@ -32,9 +32,14 @@ access routines bgetc...
 #include "globals.h"
 #include "stream.h"
 #include "marker.h"
+#ifdef FCNTL_FOR_O_RDONLY
+#include <fcntl.h>
+#endif
 #ifdef SYSV
 #include <sys/fcntl.h>
 #endif
+#include <stdlib.h>
+#include <string.h>
 
 /*PUBLIC*/
 extern void WriteSoi();
@@ -198,7 +203,7 @@ that we must have defined number of lines before as 0.
 EFUNC*/
 
 
-WriteDnl()
+void WriteDnl(void)
 {
   BEGIN("WriteDnl");
 
@@ -668,7 +673,7 @@ void ReadSos()
     }
   else
     {
-      MakeIob(IOB_BLOCK,O_WRONLY | O_CREAT | O_TRUNC,
+      MakeIob(IOB_BLOCK,O_RDWR | O_CREAT | O_TRUNC,
 	      ((CFrame->DataPrecision>8)?2:1));
       if (CFrame->GlobalHeight)
 	{

@@ -17,11 +17,6 @@ For SYSV only libraries, substitute the first line in the makefile
 which allows for SYSV libraries to be used instead.  The NOTRUNCATE
 flag avoids the lack of the ftruncate() call used in io.c.
 
-For some gcc versions on Solaris, need to include <ftype.h> not
-<sys/ftype.h> otherwise O_RDONLY etc. are not defined; define
-FCNTL_FOR_O_RDONLY. This also may need to be added to the lexer.c
-output by lex to make it compile.
-
 Caution: For the compilation, the lexer.l file should be older than
 the lexer.c file otherwise many machines will try and lex the lexer.l
 file (thus clobbering potentially the lexer.c file).  In general, the
@@ -29,10 +24,6 @@ tar will take out the lexer.l file first (it's specified to do that),
 so there shouldn't be any problems unless the directory is _copied_
 and then remade, in which case, the lexer.c file will be older because
 is lexically of lesser value than lexer.l.  This is a potential bug.
-
-For recent MacOS versions, need to changer lexer.l to specify
-"%option noyywrap" outside the "%{ ...}%" section and remove the
-"#define yywrap() 1" definition.
 
 3) Testing the program.
 

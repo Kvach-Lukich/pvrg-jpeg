@@ -30,9 +30,15 @@ This file contains the main calling routines for the JPEG coder.
 
 #include "tables.h"
 #include "globals.h"
+#ifdef FCNTL_FOR_O_RDONLY
+#include <fcntl.h>
+#endif
 #ifdef SYSV
 #include <sys/fcntl.h>
 #endif
+#include <stdlib.h>
+#include <string.h>
+#include "marker.h"
 
 /*
   Define the functions to be used with ANSI prototyping.
@@ -82,6 +88,7 @@ extern int EndofImage;
 IMAGE *CImage=NULL;           /* Current Image variables structure */
 FRAME *CFrame=NULL;           /* Current Frame variables structure */
 SCAN *CScan=NULL;             /* Current Scan variables structure */
+STDINOUT *stdInOut=NULL;
 
 /* Define the MDU counters. */
 int CurrentMDU=0;             /* Holds the value of the current MDU */
@@ -99,7 +106,7 @@ int ScanComponentThreshold=SCAN_COMPONENT_THRESHOLD;
 /* Define the support/utility variables.*/
 int ErrorValue=0;             /* Holds error upon return */
 int Loud=MUTE;                /* Loudness gives level of debug traces */
-int HuffmanTrace=NULL;        /* When set, dumps Huffman statistics */
+int HuffmanTrace=0;        /* When set, dumps Huffman statistics */
 int Notify=1;                 /* When set, gives image size feedback */
 int Robust=0;
 static int LargeQ=0;          /* When set, large quantization is enabled */
@@ -133,6 +140,13 @@ int main(argc,argv)
   MakeFrame();
   MakeScan();
 
+    if (!(stdInOut = MakeStructure(STDINOUT))){
+      WHEREAMI();
+      printf("Cannot allocate memory for STDINOUT structure.\n");
+      exit(ERROR_MEMORY);
+    }
+	stdInOut->Ccount = -1;
+
   if (argc == 1)    /* No arguments then print help info */
     {
       Help();
@@ -144,12 +158,21 @@ int main(argc,argv)
     {
       if (!strcmp(argv[i],"-JFIF"))
 	CImage->Jfif=1;
-      else if (!strcmp(argv[i],"-ci"))
+      else if (!strcmp(argv[i],"-ci")) {
+	if ( argc <= 2 ) {
+          fprintf(stderr, "Missing required parameter ComponentIndex1 for option -ci\n");
+          Help();
+          exit(-1);
+        }
 	ComponentIndex=atoi(argv[++i]);
+      }
       else if (*(argv[i]) == '-')       /* Strip off first "dash" */
  	{
  	  switch(*(++argv[i]))
  	    {
+	    case 'e':                      /* -e std in out count channels */
+		  stdInOut->Ccount = atoi(argv[++i]);
+	      break;
 	    case 'a':                      /* -a Reference DCT */
 	      UseDct = ReferenceDct;
 	      UseIDct = ReferenceIDct;
@@ -169,11 +192,21 @@ int main(argc,argv)
 	    case 'f':
  	      switch(*(++argv[i]))
  		{
- 		case 'w':                 /* -fw Frame width */
+  		case 'w':                 /* -fw Frame width */
+		  if ( argc <= 2 ) {
+		    fprintf(stderr, "Missing required parameter FrameWidth1 for option -fw\n");
+		    Help();
+		    exit(-1);
+		  }
  		  CFrame->Width[ComponentIndex] =
 		    atoi(argv[++i]);
 		  break;
 		case 'h':                 /* -fh Frame height */
+                  if ( argc <= 2 ) {
+                    fprintf(stderr, "Missing required parameter FrameHeight1 for option -fh\n");
+                    Help();
+                    exit(-1);
+                  }
 		  CFrame->Height[ComponentIndex] =
 		    atoi(argv[++i]);
 		  break;
@@ -189,9 +222,19 @@ int main(argc,argv)
 	      switch(*(++argv[i]))
 		{
 		case 'w':                /* -iw Image width */
+                  if ( argc <= 2 ) {
+                    fprintf(stderr, "Missing required parameter ImageWidth for option -iw\n");
+                    Help();
+                    exit(-1);
+                  }
 		  CFrame->GlobalWidth = atoi(argv[++i]);
 		  break;
 		case 'h':                /* -ih Image height */
+                  if ( argc <= 2 ) {
+                    fprintf(stderr, "Missing required parameter ImageHeight for option -ih\n");
+                    Help();
+                    exit(-1);
+                  }
 		  CFrame->GlobalHeight = atoi(argv[++i]);
 		  break;
 		default:
@@ -203,38 +246,89 @@ int main(argc,argv)
 		}
 	      break;
 	    case 'h':                    /* -h horizontal frequency */
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter HorizontalFrequency for option -hf\n");
+                Help();
+                exit(-1);
+              }
 	      CFrame->hf[ComponentIndex] =
 		atoi(argv[++i]);
 	      break;
 #ifndef PRODUCTION_VERSION
 	    case 'l':                    /* -l loudness for debugging */
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter for option -l\n");
+                Help();
+                exit(-1);
+              }
 	      Loud = atoi(argv[++i]);
 	      break;
 #endif
 	    case 'n':                    /* Set non-interleaved mode */
 	      ScanComponentThreshold=1;
 	      break;
-	    case 'o':                    /* -o Oracle mode (input parsing)*/
+	    case 'g':                    /* use PGM header on outfiles */
+	      CImage->OutPGM = 1;
+	      break;
+	    case 'o':                    /* -o outfile */
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter OutBaseName for option -o\n");
+                Help();
+                exit(-1);
+              }
+	      CImage->OutBaseName = argv[++i];
+	      break;
+	    case 'O':                    /* -o Oracle mode (input parsing)*/
 	      Oracle=1;
 	      break;
 	    case 'p':
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter PrecisionValue for option -p\n");
+                Help();
+                exit(-1);
+              }
 	      CFrame->DataPrecision = atoi(argv[++i]);
 	      if (!CFrame->Type) CFrame->Type = 1;
 	      break;
 	    case 'r':                    /* -r resynchronization */
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter ResyncInterval for option -r\n");
+                Help();
+                exit(-1);
+              }
 	      CFrame->ResyncInterval = atoi(argv[++i]);
 	      break;
 	    case 'q':                    /* -q Q factor */
 	      if (*(++argv[i])=='l') LargeQ=1;
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter Q-Factor for option -q\n");
+                Help();
+                exit(-1);
+              }
 	      CFrame->Q = atoi(argv[++i]);
 	      break;
 	    case 'v':                    /* -v vertical frequency */
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter VerticalFrequency for option -vf\n");
+                Help();
+                exit(-1);
+              }
 	      CFrame->vf[ComponentIndex] = atoi(argv[++i]);
 	      break;
 	    case 's':                    /* -s stream file name */
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter StreamName for option -s\n");
+                Help();
+                exit(-1);
+              }
 	      CImage->StreamFileName = argv[++i];
 	      break;
 	    case 't':
+              if ( argc <= 2 ) {
+                fprintf(stderr, "Missing required parameter pointtransform for option -t\n");
+                Help();
+                exit(-1);
+              }
 	      PointTransform=atoi(argv[++i]);
 	      break;
 #ifndef PRODUCTION_VERSION
@@ -316,9 +410,35 @@ int main(argc,argv)
 	  printf("Unspecified frame size.\n");
 	  exit(ERROR_BOUNDS);
 	}
+	if(stdInOut->Ccount>0){
+		#ifdef _WIN32
+		_setmode(_fileno(stdin), _O_BINARY);
+		_setmode(_fileno(stdout), _O_BINARY);
+		#endif
+		size_t raw_size = (size_t)(CFrame->GlobalWidth * CFrame->GlobalHeight * ((CFrame->DataPrecision > 8) ? 2 : 1)*2 );
+		stdInOut->raw = malloc(raw_size);
+		if(!stdInOut->raw) {
+			fprintf(stderr, "Malloc failed for raw buffer\n");
+			exit(ERROR_MEMORY);
+		}
+		stdInOut->out = malloc(raw_size);
+		stdInOut->output_size=0;
+		if(!stdInOut->out) {
+			fprintf(stderr, "Malloc failed for output\n");
+			exit(ERROR_MEMORY);
+		}
+
+		size_t read_size = fread(stdInOut->raw, 1, raw_size, stdin);
+		if(read_size!=raw_size){
+			WHEREAMI();
+			printf("Ahtung! size of input incorrect %zu , expect %zu.\n", read_size, raw_size);
+			exit(ERROR_BOUNDS);
+		}
+	}
       swopen(CImage->StreamFileName,0);          /* Open output file, index 0*/
       JpegEncodeFrame();                         /* Encode the frame */
       swclose();                                 /* Flush remaining bits */
+	  fwrite(stdInOut->out, 1, stdInOut->output_size, stdout);
     }
   exit(ErrorValue);
 }
@@ -1298,7 +1418,7 @@ static void JpegDecodeFrame()
 	    {
 	      if (Notify)             /* Print statistics */
 		{
-		  printf("> GW:%d  GH:%d  R:%d\n",
+		  printf("> GlobalWidth:%d  GlobalHeight:%d  ResyncInverval:%d\n",
 			 CFrame->GlobalWidth,
 			 CFrame->GlobalHeight,
 			 CFrame->ResyncInterval);
@@ -1307,7 +1427,7 @@ static void JpegDecodeFrame()
 		{
 		  if (Notify)
 		    {
-		      printf(">> C:%d  N:%s  W:%d  H:%d  hf:%d  vf:%d\n",
+		      printf(">> C:%2d  N: %s  W:%6d  H:%6d  hf:%d  vf:%d\n",
 			     CScan->ci[i],
 			     CFrame->ComponentFileName[CScan->ci[i]],
 			     CFrame->Width[CScan->ci[i]],
@@ -1318,6 +1438,10 @@ static void JpegDecodeFrame()
 		  InstallIob(i);
 		  FlushIob();                        /* Close image files */
 		  SeekEndIob();
+		  if (CImage->OutPGM)
+		    {
+		      InstallHeaderIob();
+		    } 
 		  CloseIob();
 		}
 	      CurrentMDU=0;
@@ -1358,6 +1482,8 @@ static void JpegLosslessDecodeScan()
   int MaxElem,CurrentElem,NumberElem;
   int StartofLine=1,UseType=1;              /* Start with type 1 coding */
   int *input;
+  int last_pixel;				/* should initialize this sometime */
+  int detected_gems_predictor_bug;
 
   PointTransform=CScan->SAL;
   for(j=0;j<CScan->NumberComponents;j++)    /* Important to rewind to start */
@@ -1379,7 +1505,7 @@ static void JpegLosslessDecodeScan()
 	}
     }
   InstallIob(0);
-  UseDCHuffman(CScan->td[0]);          /* Install DC table */
+  UseDCHuffmanCheckingGEMSBug(CScan->td[0],&detected_gems_predictor_bug);          /* Install DC table */
   if (CScan->NumberComponents==1)
     height=horfreq=1;
   else
@@ -1466,7 +1592,8 @@ static void JpegLosslessDecodeScan()
 	      px = input[width];
 	      break;
 	    case 2:
-	      px = input[1];
+	    /*px = input[1];*/
+	      px = detected_gems_predictor_bug ? last_pixel : input[1];
 	      break;
 	    case 3:
 	      px = input[0];
@@ -1493,7 +1620,13 @@ static void JpegLosslessDecodeScan()
 	  else
 	    {
 	      value = LosslessDecodeDC();
-	      input[width+1] = (value+px)&0xffff;
+	      if (detected_gems_predictor_bug) {
+	        input[width+1] = (px-value)&0xffff;
+	        last_pixel = (px-value)&0xffff;
+	      }
+	      else {
+	        input[width+1] = (value+px)&0xffff;
+	      }
 	      if (Loud > MUTE)
 		{
 		  printf("OUT=%d  PX=%d  VAL: %d\n",
@@ -1720,7 +1853,7 @@ void PrintImage()
   BEGIN("PrintImage");
   int i;
 
-  printf("*** Image ID: %x ***\n",CImage);
+  printf("*** Image ID: %p ***\n",(void*)CImage);
   if (CImage)
     {
       if (CImage->StreamFileName)
@@ -1770,14 +1903,14 @@ void PrintFrame()
   BEGIN("PrintFrame");
   int i;
 
-  printf("*** Frame ID: %x *** (TYPE: %d)\n",CFrame,CFrame->Type);
+  printf("*** Frame ID: %p *** (TYPE: %d)\n",(void*)CFrame,CFrame->Type);
   if (CFrame)
     {
       printf("DataPrecision: %d  ResyncInterval: %d\n",
 	     CFrame->DataPrecision,CFrame->ResyncInterval);
       printf("Height: %d   Width: %d\n",
 	     CFrame->GlobalHeight,CFrame->GlobalWidth);
-      printf("BufferSize: %d  Image: %x\n",CFrame->BufferSize,CFrame->Image);
+      printf("BufferSize: %d  Image: %p\n",CFrame->BufferSize,(void*)CFrame->Image);
       printf("NumberComponents %d\n",
 	     CFrame->GlobalNumberComponents);
       for(i=0;i<CFrame->GlobalNumberComponents;i++)
@@ -1808,7 +1941,7 @@ void PrintScan()
   BEGIN("PrintScan");
   int i;
 
-  printf("*** Scan ID: %x ***\n",CScan);
+  printf("*** Scan ID: %p ***\n",(void*)CScan);
   if (CScan)
     {
       printf("NumberComponents %d\n",
@@ -1819,8 +1952,8 @@ void PrintScan()
 		 i,CScan->ci[i]);
 	  printf("DC Huffman Table: %d  AC Huffman Table: %d\n",
 		 CScan->td[i],CScan->ta[i]);
-	  printf("LastDC: %d  Iob: %x\n",
-		 *(CScan->LastDC[i]),CScan->Iob[i]);
+	  printf("LastDC: %d  Iob: %p\n",
+		 *(CScan->LastDC[i]),(void*)CScan->Iob[i]);
 	}
       printf("NumberACSend: %d  NumberDCSend: %d  NumberQSend: %d\n",
 	     CScan->NumberACTablesSend,
@@ -1856,6 +1989,8 @@ void MakeImage()
   CImage->QuantizationMatrices[1] = ChrominanceQuantization;
   CImage->NumberACTables = 0;       /* No tables defined yet */
   CImage->NumberDCTables = 0;
+  CImage->OutBaseName = NULL;
+  CImage->OutPGM = 0;
 }
 
 /*BFUNC
@@ -1981,22 +2116,37 @@ void MakeConsistentFileNames()
 {
   BEGIN("MakeConsistentFileNames");
   int i;
+  char ext[8];
+
+  if(CImage->OutBaseName == NULL)
+    { /* No base name specified, just use stream. */
+      CImage->OutBaseName = CImage->StreamFileName;
+    }
+
+  if(CImage->OutPGM)
+    { /* PGM header request, let's set the extension. */
+      sprintf(ext,".pgm");
+    }
+  else
+   { /* empty string */
+     *ext = 0;
+   }
 
   for(i=0;i<CScan->NumberComponents;i++)
     {
       if (CImage->ImageSequence)  /* If in sequence, must add sequence */
 	{                         /* identifier */
 	  CFrame->ComponentFileName[CScan->ci[i]] = 
-	    (char *) calloc(strlen(CImage->StreamFileName)+16,sizeof(char));
-	  sprintf(CFrame->ComponentFileName[CScan->ci[i]],"%s.%d.%d",
-		  CImage->StreamFileName,CImage->ImageSequence,CScan->ci[i]);
+	    (char *) calloc(strlen(CImage->StreamFileName)+20,sizeof(char));
+	  sprintf(CFrame->ComponentFileName[CScan->ci[i]],"%s.%d.%d%s",
+		  CImage->OutBaseName,CImage->ImageSequence,CScan->ci[i], ext);
 	}
       else if (CFrame->ComponentFileName[CScan->ci[i]] == NULL)
 	{                        /* Otherwise if none specified, create. */
 	  CFrame->ComponentFileName[CScan->ci[i]] = 
-	    (char *) calloc(strlen(CImage->StreamFileName)+8,sizeof(char));
-	  sprintf(CFrame->ComponentFileName[CScan->ci[i]],"%s.%d",
-		  CImage->StreamFileName,CScan->ci[i]);
+	    (char *) calloc(strlen(CImage->StreamFileName)+12,sizeof(char));
+	  sprintf(CFrame->ComponentFileName[CScan->ci[i]],"%s.%d%s",
+		  CImage->OutBaseName,CScan->ci[i], ext);
 	}
     }
 }
@@ -2026,8 +2176,9 @@ void CheckValidity()
     {
       if (CImage->JpegMode == J_LOSSLESS)
 	{
-	  if (CFrame->DataPrecision<=16)
-	    printf("Precision type: %d\n",CFrame->DataPrecision);
+	  if (CFrame->DataPrecision<=16){
+	    //printf("Precision type: %d\n",CFrame->DataPrecision);
+	  }
 	  else
 	    printf("Caution: precision type: %d greater than 16.\n",
 		   CFrame->DataPrecision);
@@ -2117,9 +2268,10 @@ EFUNC*/
 void ConfirmFileSize()
 {
   BEGIN("ConfirmFileSize");
+  if (stdInOut->Ccount > 0) return;
   int i,FileSize;
   FILE *test;
-
+  
   for(i=0;i<CScan->NumberComponents;i++)  /* Do for all components in scan*/
     {
       if (CFrame->ComponentFileName[CScan->ci[i]])
@@ -2182,9 +2334,9 @@ static void Help()
   BEGIN("Help");
 
   printf("jpeg -iw ImageWidth -ih ImageHeight [-JFIF] [-q(l) Q-Factor]\n");
-  printf("     [-a] [-b] [-d] [-k predictortype] [-n] [-o] [-y] [-z]\n");
+  printf("     [-a] [-b] [-d] [-k predictortype] [-n] [-O] [-y] [-z] [-g]\n");
   printf("     [-p PrecisionValue] [-t pointtransform]\n");
-  printf("     [-r ResyncInterval] [-s StreamName]\n");
+  printf("     [-r ResyncInterval] [-s StreamName] [-o OutBaseName]\n");
   printf("     [[-ci ComponentIndex1] [-fw FrameWidth1] [-fh FrameHeight1]\n");
   printf("      [-hf HorizontalFrequency1] [-vf VerticalFrequency1]\n");
   printf("      ComponentFile1]\n");
@@ -2196,14 +2348,17 @@ static void Help()
   printf("-a enables Reference DCT.\n");
   printf("-b enables Lee DCT.\n");
   printf("-d decoder enable.\n");
+  printf("-g put PGM headers on decode output files.\n");
   printf("-[k predictortype] enables lossless mode.\n");
   printf("-q specifies quantization factor; -ql specifies can be long.\n");
   printf("-n enables non-interleaved mode.\n");
   printf("-[t pointtransform] is the number of bits for the PT shift.\n");
-  printf("-o enables the Command Interpreter.\n");
+  printf("-o set a base name for decode output files.\n");
+  printf("-O enables the Command Interpreter.\n");
   printf("-p specifies precision.\n");
   printf("-y run in robust mode against errors (cannot be used with DNL).\n");
   printf("-z uses default Huffman tables.\n");
+  printf("-e Std in out mode components count.\n");
 }
 
 /*END*/

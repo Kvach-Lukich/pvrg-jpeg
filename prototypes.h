@@ -85,6 +85,7 @@ extern void MakeEhuff();
 extern void MakeDhuff();
 extern void UseACHuffman();
 extern void UseDCHuffman();
+extern void UseDCHuffmanCheckingGEMSBug();
 extern void SetACHuffman();
 extern void SetDCHuffman();
 extern void PrintHuffman();
@@ -105,6 +106,7 @@ extern void PrintIob();
 extern int NumberBlocksIob();
 extern int NumberBlockMDUIob();
 extern void InstallIob();
+extern void InstallHeaderIob();
 extern void TerminateFile();
 
 extern int NumberLineMDUIob();

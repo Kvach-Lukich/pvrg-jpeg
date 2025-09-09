@@ -70,6 +70,7 @@ static int pgetc();
 extern int ErrorValue;
 extern IMAGE *CImage;
 extern int Robust;         /* Whether to ignore scan markers and such */
+extern STDINOUT *stdInOut;
 
 /* Masks */
 int bit_set_mask[] = { /* This is 2^i at ith position */
@@ -230,6 +231,42 @@ void popstream(index)
 
 /* THAT'S ALL FOR THE STACK STREAM LIBRARY! */
 
+int my_seek(FILE *fid, long offset, long whence){
+    int ret;
+    ret=-1;
+    //if (stdInOut->Ccount>0 && !fid){
+    if (stdInOut->Ccount>0 && fid == stdInOut->fid){
+      if(whence == 0L){
+        if(offset<stdInOut->output_size){
+          ret=0;
+          stdInOut->output_pos=(size_t)offset;
+        }
+      }else if(whence==2L){
+        stdInOut->output_pos=stdInOut->output_size;
+        ret=0;
+      }else if(whence==1L){
+        if(stdInOut->output_pos+offset<stdInOut->output_size){
+          stdInOut->output_pos=stdInOut->output_pos+(size_t)offset;
+          ret=0;
+        }
+      }
+    }else{
+       ret = fseek(fid, offset, whence);
+    }
+    //ret = fseek(fid, offset, whence);
+    return ret;
+}
+
+long my_ftell(FILE *fid){
+  //if (stdInOut->Ccount>0 && !fid){
+  if (stdInOut->Ccount>0 && fid == stdInOut->fid){
+    //return ftell(fid);
+    return (long)stdInOut->output_pos;
+  }else{
+    return ftell(fid);
+  }
+}
+
 /* BUFFER LIBRARY */
 
 /*BFUNC
@@ -239,7 +276,7 @@ brtell() is used to find the location in the read stream.
 EFUNC*/
 
 int brtell()
-  {BEGIN("brtell");return(ftell(srin));}
+  {BEGIN("brtell");return(my_ftell(srin));}
 
 /*BFUNC
 
@@ -250,7 +287,7 @@ EFUNC*/
 int brseek(offset,ptr)
      int offset;
      int ptr;
-  {BEGIN("brseek");return(fseek(srin,offset,ptr));}
+  {BEGIN("brseek");return(my_seek(srin,offset,ptr));}
 
 /*BFUNC
 
@@ -290,7 +327,20 @@ EFUNC*/
 
 void bputc(c)
      int c;
-  {BEGIN("bputc");putc(c,swout);}
+  {
+    BEGIN("bputc");
+    if(stdInOut->Ccount<0){
+      putc(c,swout);
+    }
+    stdInOut->out[stdInOut->output_pos] = (unsigned char)c;
+    
+    if(stdInOut->output_pos==stdInOut->output_size){
+      stdInOut->output_size++;
+    }else if(stdInOut->output_size<stdInOut->output_pos){
+      printf("Ooops wrong position %zu of %zu\n", stdInOut->output_pos-1, stdInOut->output_size);
+    }
+    stdInOut->output_pos++;
+  }
 
 /* PROTECTED MARKER GETS AND FETCHES */
 
@@ -367,6 +417,7 @@ void mropen(filename,index)
 	     filename);
       exit(ERROR_INIT_FILE);
     }
+    stdInOut->srin=srin;
   CleartoResync=0;
   ResyncEnable=0;
   ResyncCount=0;
@@ -419,12 +470,19 @@ void mwopen(filename,index)
   if ((Stack_Stream_Current!=index)) pushstream();
   current_write_byte=0;
   write_position=7;
-  if ((swout = fopen(filename,"w+"))==NULL)
-    {
-      WHEREAMI();
-      printf("Cannot open output file %s.\n",filename);
-      exit(ERROR_INIT_FILE);
-    }
+  if(stdInOut->Ccount<0){
+    if ((swout = fopen(filename,"w+b"))==NULL)
+      {
+        WHEREAMI();
+        printf("Cannot open output file %s.\n",filename);
+        exit(ERROR_INIT_FILE);
+      }
+      stdInOut->fid=swout;
+  }else{
+      swout=NULL;
+      stdInOut->fid=swout;
+  }
+    
   Stack_Stream_Current= index;
   Stack_Stream_Active[index]=1;
 }
@@ -460,7 +518,9 @@ void mwclose()
   BEGIN("mwclose");
 
   swbytealign();
-  fclose(swout);
+  if(swout){
+    fclose(swout);
+  }
   swout=NULL;
   if (srin==NULL)
     {
@@ -479,7 +539,7 @@ long mwtell()
 {
   BEGIN("mwtell");
 
-  return((ftell(swout)<<3) + (7 - write_position));
+  return((my_ftell(swout)<<3) + (7 - write_position));
 }
 
 /*BFUNC
@@ -492,7 +552,7 @@ long mrtell()
 {
   BEGIN("mrtell");
 
-  return((ftell(srin)<<3) - (read_position+1));
+  return((my_ftell(srin)<<3) - (read_position+1));
 }
 
 /*BFUNC
@@ -509,11 +569,15 @@ void mwseek(distance)
 
   if (write_position!=7)             /* Must flush out current byte */
     {
-      putc(current_write_byte,swout);
+      bputc(current_write_byte);
     }
-  fseek(swout,0,2L);                 /* Find end */
-  length = ftell(swout);
-  fseek(swout,((distance+7)>>3),0L);
+  my_seek(swout,0,2L);
+  if(stdInOut->Ccount<0){
+    length = my_ftell(swout);
+  }else{
+    length=(long)stdInOut->output_size;
+  }
+  my_seek(swout,((distance+7)>>3),0L);
   if ((length<<3) <= distance)       /* Make sure we read clean stuff */
     {
       current_write_byte = 0;
@@ -521,9 +585,15 @@ void mwseek(distance)
     }
   else
     {
-      current_write_byte = getc(swout);  /* if within bounds, then read byte */
+      if(stdInOut->Ccount<0){
+        current_write_byte = getc(swout);  /* if within bounds, then read byte */
+      }else{
+        current_write_byte = stdInOut->out[stdInOut->output_pos];
+      }
+
+      //stdInOut->output_pos++;
       write_position = 7 - (distance & 0x7);
-      fseek(swout,((distance+7)>>3),0L); /* Reset seek pointer for write */
+      my_seek(swout,((distance+7)>>3),0L); /* Reset seek pointer for write */
     }
 }
 
@@ -539,7 +609,7 @@ void mrseek(distance)
 {
   BEGIN("mrseek");
 
-  fseek(srin,(distance>>3),0L);       /* Go to location */
+  my_seek(srin,(distance>>3),0L);       /* Go to location */
   current_read_byte = bgetc();        /* read byte in */
   read_position = 7 - (distance % 8);
 }
@@ -675,15 +745,15 @@ int DoMarker()
   read_position= -1;                    /* Make sure we are byte-flush. */
   while(marker_read_byte==MARKER_FIL)   /* Get rid of FIL markers */
     {
-#ifdef VERSION_1.0
-      if ((marker_read_byte = bgetc())!=MARKER_MARKER)
-	{
-	  WHEREAMI();
-	  printf("Unknown FIL marker. Bypassing.\n");
-	  ErrorValue = ERROR_MARKER;
-	  return(0);
-	}
-#endif
+// #ifdef VERSION_1_0
+//       if ((marker_read_byte = bgetc())!=MARKER_MARKER)
+// 	{
+// 	  WHEREAMI();
+// 	  printf("Unknown FIL marker. Bypassing.\n");
+// 	  ErrorValue = ERROR_MARKER;
+// 	  return(0);
+// 	}
+// #endif
       marker_read_byte = bgetc();
     }
   lon = marker_read_byte & 0x0f;         /* Segregate between hi and lo */
