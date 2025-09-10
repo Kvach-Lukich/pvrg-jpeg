@@ -21,3 +21,15 @@ In encoder mode, a new parameter `-e <number_of_components>` has been added, all
    ```bash
    sudo apt install build-essential
 2. Run `build.sh`
+
+Example to use:
+```bash
+prepared_data | pvrg_jpeg -e 2 -iw 2640 -ih 3528 -k 1 -p 14 -ci 1 component1 -ci 2 component2 >output.jpeg
+```
+prepared_data component 1 R & G1 lines of Bayer data + component 2 G2 & B lines...  
+-e 2 enable stdin out mode for 2 components  
+-iw 2640 half of Bayer width data 5280  
+-ih 3528 Bayer height  
+-k 1 lossless  
+-p 14 bits (for canon 14 bit matrix)  
+-ci 1 component1 Component number and file name for backward compatibility with file mode  
